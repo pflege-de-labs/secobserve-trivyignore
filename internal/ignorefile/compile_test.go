@@ -98,3 +98,14 @@ func TestMarshalGolden(t *testing.T) {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+func TestCompileIgnoresNonSuppressingStatus(t *testing.T) {
+	r := Compile([]secobserve.Observation{
+		obs(1, "Open", "CVE-2025-1", "pkg:golang/a@v1", nil),
+		obs(2, "Affected", "CVE-2025-2", "pkg:golang/a@v1", nil),
+		obs(3, "In review", "CVE-2025-3", "pkg:golang/a@v1", nil),
+	}, base)
+	if len(r.File.Vulnerabilities) != 0 {
+		t.Fatalf("got %+v", r.File.Vulnerabilities)
+	}
+}

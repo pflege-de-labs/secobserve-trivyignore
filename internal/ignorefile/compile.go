@@ -36,6 +36,10 @@ func Compile(obs []secobserve.Observation, frontendURL string) Result {
 	byKey := map[key]Entry{}
 	skipped := 0
 	for _, o := range obs {
+		// Defence in depth: never suppress on a status the API filter should have excluded.
+		if !slices.Contains(SuppressingStatuses, o.CurrentStatus) {
+			continue
+		}
 		if o.VulnerabilityID == "" {
 			continue
 		}
