@@ -1,0 +1,18 @@
+vulnerabilities:
+    - id: CVE-2025-1
+      purls:
+        - pkg:golang/a@v0
+      statement: Not security — https://so/#/observations/4/show
+    - id: CVE-2025-1
+      purls:
+        - pkg:golang/a@v1
+      statement: False positive — https://so/#/observations/9/show
+    - id: CVE-2025-2
+      purls:
+        - pkg:maven/b/c@1?type=jar
+      expired_at: "2027-01-19"
+      statement: Risk accepted — https://so/#/observations/3/show
+    - id: GHSA-x
+      purls:
+        - pkg:golang/a@v1
+      statement: False positive — https://so/#/observations/9/show
