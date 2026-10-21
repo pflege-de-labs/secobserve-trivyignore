@@ -26,11 +26,10 @@ Non-goals:
 
 Verified while bootstrapping the repository (2026-10-21):
 
-- SecObserve version: not verified (unreachable without credentials).
-  `https://secobserve.p4e.io/api/status/version/` serves the UI and
-  `https://api.secobserve.p4e.io/api/status/version/` answers 401 without a token. Re-check with
-  the Reader token once it exists; needs >= 1.55 (`vulnerability_id_aliases`,
-  `repository_default_branch`, multi-value `current_status`).
+- SecObserve version: >= 1.58.0. Helm chart 1.2.0 ships appVersion 1.58.0 (upstream
+  `charts/secobserve/Chart.yaml` history) and cc-gitops deploys chart 1.2.2, which is newer. This
+  covers the fields used (`vulnerability_id_aliases`, `repository_default_branch`, multi-value
+  `current_status`).
 - Trivy 0.76.0 honours `expired_at`, checked against `alpine:3.19`, CVE-2024-58251 on `busybox`:
   with `2020-01-01` the CVE is still reported, with `2099-01-01` it is suppressed. The service
   need not drop expired entries itself.
@@ -136,15 +135,13 @@ and won't match Trivy CVE IDs. `go-full*` additionally uploads its Trivy result 
 
 - Unit: compile rules (status filter, expiry, purl omission, sort), product resolution (0/1/n, param), staleness.
 - HTTP tests with a fake SecObserve (`httptest`) and locally signed JWTs against a test JWKS.
-- Manual: Trivy honours `expired_at` (docs silent) — verify before relying on it; if not honoured, service drops
-  expired entries itself (it already has the date).
+- Trivy 0.76.0 honours `expired_at` (verified 2026-10-21, see Facts), so the service does not drop expired entries.
 - End-to-end: one labs repo with a known false-positive CVE; PR passes gate, entry visible in step summary.
 
-### Open checks
+### Open checks (follow-up plans C and D)
 
-- Deployed SecObserve version (chart 1.2.2 appVersion) ≥ fields used above.
-- Gateway `webhooks.management.p4e.io` can route a new path and passes `Authorization` through.
-- `go-full` repos: `SO_API_TOKEN` present (only for repos with a `secobserve:` block).
+- OPEN: Gateway `webhooks.management.p4e.io` can route a new path and passes `Authorization` through.
+- OPEN: `go-full` repos: `SO_API_TOKEN` present (only for repos with a `secobserve:` block).
 
 ## Consequences
 
