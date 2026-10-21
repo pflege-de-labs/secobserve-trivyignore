@@ -11,6 +11,10 @@ permissions:
 jobs:
   checks:
     uses: pflege-de-labs/github-workflows/.github/workflows/go-checks.yml@d5b9ce5cc098cf3239e796f49d742a48140130c0 # v1.0.0
+    with:
+      # go.mod's 1.26.0 is the language floor; CI builds with the patched toolchain govulncheck expects.
+      go-version: stable
+      golangci-lint-version: v2.14.0
 
   # Branch protection requires image, so waiting on checks keeps a failing change out of the main image.
   build:

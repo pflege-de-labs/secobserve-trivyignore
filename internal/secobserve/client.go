@@ -94,7 +94,7 @@ func (c *Client) get(ctx context.Context, u string, out any) error {
 		// url.Error carries the URL only, never headers, so the token stays out.
 		return fmt.Errorf("secobserve: GET %s: %w", req.URL.Path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return fmt.Errorf("secobserve: GET %s: status %d", req.URL.Path, resp.StatusCode)
 	}
