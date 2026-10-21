@@ -26,7 +26,7 @@ Non-goals:
 
 Verified while bootstrapping the repository (2026-10-21):
 
-- SecObserve version: >= 1.58.0. Helm chart 1.2.0 ships appVersion 1.58.0 (upstream
+- SecObserve version: >= 1.58.0 (inferred from chart history, not queried live). Helm chart 1.2.0 ships appVersion 1.58.0 (upstream
   `charts/secobserve/Chart.yaml` history) and cc-gitops deploys chart 1.2.2, which is newer. This
   covers the fields used (`vulnerability_id_aliases`, `repository_default_branch`, multi-value
   `current_status`).
@@ -99,6 +99,15 @@ Products without default branch → empty list (valid, suppresses nothing).
 
 Cache is in memory; a restart during a SecObserve outage yields `503` until it recovers (accepted: stricter, not
 weaker). Refresh fetches all products on a ticker; one product failing keeps its previous entry.
+
+### Trust boundary and deployment
+
+- The repository-to-product mapping trusts SecObserve's `repository_prefix`, which product owners can edit in
+  SecObserve. They can thereby attach suppressions to a repository Terraform does not map to their product.
+  Accepted: they can already assess those findings.
+- `/metrics` shares the listener with `/v1/trivyignore`, and metric labels carry product names. The gateway
+  route must expose only `/v1/trivyignore`.
+- The service needs egress to `token.actions.githubusercontent.com` (OIDC discovery and JWKS).
 
 ### Credentials
 
