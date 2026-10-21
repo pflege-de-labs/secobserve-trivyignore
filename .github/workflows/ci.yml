@@ -1,0 +1,13 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    uses: pflege-de-labs/github-workflows/.github/workflows/go-checks.yml@d5b9ce5cc098cf3239e796f49d742a48140130c0 # v1.0.0
