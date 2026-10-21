@@ -28,7 +28,7 @@ func TestMetricsExposed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer shutdown(context.Background())
+	defer func() { _ = shutdown(context.Background()) }()
 
 	c := cache.New(failingSource{}, "", time.Now)
 	_ = c.Refresh(context.Background())
