@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 )
@@ -32,6 +34,8 @@ func NewVerifier(v *oidc.IDTokenVerifier, allowedOwners []string) *Verifier {
 }
 
 func NewGitHubVerifier(ctx context.Context, audience string, allowedOwners []string) (*Verifier, error) {
+	// The client is kept by the provider, so this also bounds later JWKS refreshes.
+	ctx = oidc.ClientContext(ctx, &http.Client{Timeout: 10 * time.Second})
 	p, err := oidc.NewProvider(ctx, githubIssuer)
 	if err != nil {
 		return nil, fmt.Errorf("oidc provider: %w", err)
