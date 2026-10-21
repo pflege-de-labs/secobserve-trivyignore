@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pflege-de-labs/secobserve-trivyignore/internal/ignorefile"
 	"github.com/pflege-de-labs/secobserve-trivyignore/internal/secobserve"
 )
 
@@ -15,14 +16,18 @@ type fakeSource struct {
 	productsErr error
 	obsErr      map[int]error
 	obsCalls    int
+	gotBranch   []int
+	gotStatuses [][]string
 }
 
 func (f *fakeSource) ListProducts(context.Context) ([]secobserve.Product, error) {
 	return f.products, f.productsErr
 }
 
-func (f *fakeSource) ListObservations(_ context.Context, id, _ int, _ []string) ([]secobserve.Observation, error) {
+func (f *fakeSource) ListObservations(_ context.Context, id, branch int, statuses []string) ([]secobserve.Observation, error) {
 	f.obsCalls++
+	f.gotBranch = append(f.gotBranch, branch)
+	f.gotStatuses = append(f.gotStatuses, statuses)
 	return nil, f.obsErr[id]
 }
 
@@ -35,9 +40,18 @@ func clock(t *time.Time) func() time.Time { return func() time.Time { return *t 
 
 func TestRefreshPopulates(t *testing.T) {
 	now := time.Unix(100, 0)
-	c := New(&fakeSource{products: []secobserve.Product{prod(1, "A", "https://github.com/o/a"), prod(2, "B", "https://github.com/o/b")}}, "", clock(&now))
+	src := &fakeSource{products: []secobserve.Product{prod(1, "A", "https://github.com/o/a"), prod(2, "B", "https://github.com/o/b")}}
+	c := New(src, "", clock(&now))
 	if err := c.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	for i := range src.gotBranch {
+		if src.gotBranch[i] != 1 || !reflect.DeepEqual(src.gotStatuses[i], ignorefile.SuppressingStatuses) {
+			t.Errorf("call %d: branch %d statuses %v", i, src.gotBranch[i], src.gotStatuses[i])
+		}
+	}
+	if len(src.gotBranch) != 2 {
+		t.Fatalf("calls = %d", len(src.gotBranch))
 	}
 	for _, n := range []string{"A", "B"} {
 		it, ok := c.Get(n)
@@ -159,5 +173,26 @@ func TestRunStopsOnCancel(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not return")
+	}
+}
+
+func TestListedAtOnlyAfterSuccessfulListProducts(t *testing.T) {
+	now := time.Unix(100, 0)
+	src := &fakeSource{productsErr: errors.New("down")}
+	c := New(src, "", clock(&now))
+	_ = c.Refresh(context.Background())
+	if _, ok := c.ListedAt(); ok {
+		t.Fatal("listed after failed ListProducts")
+	}
+	src.productsErr = nil
+	_ = c.Refresh(context.Background())
+	if at, ok := c.ListedAt(); !ok || !at.Equal(now) {
+		t.Fatalf("ListedAt = %v %v", at, ok)
+	}
+	now = time.Unix(200, 0)
+	src.productsErr = errors.New("down")
+	_ = c.Refresh(context.Background())
+	if at, _ := c.ListedAt(); !at.Equal(time.Unix(100, 0)) {
+		t.Fatalf("failed refresh moved ListedAt to %v", at)
 	}
 }

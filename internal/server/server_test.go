@@ -22,14 +22,28 @@ var (
 )
 
 type fakeStore struct {
-	products []string
+	byRepo   map[string][]string
 	items    map[string]cache.Item
+	listedAt time.Time
+	listed   bool
+	gotRepos *[]string
 }
 
-func (f fakeStore) Products(string) []string { return f.products }
+func (f fakeStore) Products(repo string) []string {
+	if f.gotRepos != nil {
+		*f.gotRepos = append(*f.gotRepos, repo)
+	}
+	return f.byRepo[repo]
+}
 func (f fakeStore) Get(p string) (cache.Item, bool) {
 	i, ok := f.items[p]
 	return i, ok
+}
+func (f fakeStore) ListedAt() (time.Time, bool) { return f.listedAt, f.listed }
+
+// st builds a store whose repository o/r owns products, listed just now.
+func st(products []string, items map[string]cache.Item) fakeStore {
+	return fakeStore{byRepo: map[string][]string{"o/r": products}, items: items, listedAt: t0, listed: true}
 }
 
 type fakeAuth struct {
@@ -46,8 +60,16 @@ func item(p string, age time.Duration) cache.Item {
 }
 
 func TestTrivyIgnore(t *testing.T) {
-	one := fakeStore{[]string{"a"}, map[string]cache.Item{"a": item("a", 10*time.Minute)}}
-	two := fakeStore{[]string{"a", "b"}, map[string]cache.Item{"a": item("a", time.Minute), "b": item("b", time.Minute)}}
+	one := st([]string{"a"}, map[string]cache.Item{"a": item("a", 10*time.Minute)})
+	two := st([]string{"a", "b"}, map[string]cache.Item{"a": item("a", time.Minute), "b": item("b", time.Minute)})
+	other := fakeStore{byRepo: map[string][]string{"o/other": {"x"}}, items: map[string]cache.Item{"x": item("x", 0)}, listedAt: t0, listed: true}
+	both := one
+	both.byRepo = map[string][]string{"o/r": {"a"}, "o/other": {"x"}}
+	both.items = map[string]cache.Item{"a": item("a", 0), "x": item("x", 0)}
+	neverListed := one
+	neverListed.listed = false
+	staleList := one
+	staleList.listedAt = t0.Add(-time.Hour - time.Second)
 	ok := fakeAuth{claims: auth.Claims{Repository: "o/r"}}
 	tests := []struct {
 		name   string
@@ -64,13 +86,17 @@ func TestTrivyIgnore(t *testing.T) {
 		{"unauthenticated", one, fakeAuth{err: fmt.Errorf("x: %w", auth.ErrUnauthenticated)}, "", 401, "unauthorized", ""},
 		{"other verify error", one, fakeAuth{err: errors.New("boom")}, "", 401, "unauthorized", ""},
 		{"forbidden", one, fakeAuth{err: fmt.Errorf("x: %w", auth.ErrForbidden)}, "", 403, "forbidden", ""},
-		{"no product", fakeStore{}, ok, "", 404, "no SecObserve product for repository", ""},
+		{"no product", other, ok, "", 404, "no SecObserve product for repository", ""},
+		{"other repo's product", both, ok, "?product=x", 403, "product not allowed", ""},
+		{"never listed", neverListed, ok, "", 503, "ignore file unavailable", ""},
+		{"product list stale", staleList, ok, "", 503, "ignore file unavailable", ""},
+		{"never listed but unauthenticated", neverListed, fakeAuth{err: auth.ErrUnauthenticated}, "", 401, "unauthorized", ""},
 		{"multi without param", two, ok, "", 400, "product parameter required", ""},
 		{"multi not in set", two, ok, "?product=z", 403, "product not allowed", ""},
 		{"single mismatch", one, ok, "?product=z", 403, "product not allowed", ""},
-		{"item missing", fakeStore{products: []string{"a"}}, ok, "", 503, "ignore file unavailable", ""},
-		{"stale", fakeStore{[]string{"a"}, map[string]cache.Item{"a": item("a", time.Hour+time.Second)}}, ok, "", 503, "ignore file unavailable", ""},
-		{"exactly max staleness", fakeStore{[]string{"a"}, map[string]cache.Item{"a": item("a", time.Hour)}}, ok, "", 200, "body-a", "3600"},
+		{"item missing", st([]string{"a"}, nil), ok, "", 503, "ignore file unavailable", ""},
+		{"stale", st([]string{"a"}, map[string]cache.Item{"a": item("a", time.Hour+time.Second)}), ok, "", 503, "ignore file unavailable", ""},
+		{"exactly max staleness", st([]string{"a"}, map[string]cache.Item{"a": item("a", time.Hour)}), ok, "", 200, "body-a", "3600"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -111,8 +137,8 @@ func TestProbes(t *testing.T) {
 
 func TestNoTokenInLogs(t *testing.T) {
 	var buf bytes.Buffer
-	st := fakeStore{[]string{"a"}, map[string]cache.Item{"a": item("a", 0)}}
-	h := New(st, fakeAuth{claims: auth.Claims{Repository: "o/r"}}, time.Hour, func() time.Time { return t0 }, slog.New(slog.NewTextHandler(&buf, nil)))
+	store := st([]string{"a"}, map[string]cache.Item{"a": item("a", 0)})
+	h := New(store, fakeAuth{claims: auth.Claims{Repository: "o/r"}}, time.Hour, func() time.Time { return t0 }, slog.New(slog.NewTextHandler(&buf, nil)))
 	req := httptest.NewRequest("GET", "/v1/trivyignore", nil)
 	req.Header.Set("Authorization", "Bearer s3cr3t-token")
 	h.ServeHTTP(httptest.NewRecorder(), req)
@@ -124,5 +150,16 @@ func TestNoTokenInLogs(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("log missing %q: %s", want, out)
 		}
+	}
+}
+
+func TestProductsScopedToTokenRepository(t *testing.T) {
+	var got []string
+	store := st([]string{"a"}, map[string]cache.Item{"a": item("a", 0)})
+	store.gotRepos = &got
+	h := New(store, fakeAuth{claims: auth.Claims{Repository: "o/r"}}, time.Hour, func() time.Time { return t0 }, slog.New(slog.DiscardHandler))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/v1/trivyignore?product=other-repos-product", nil))
+	if len(got) != 1 || got[0] != "o/r" {
+		t.Fatalf("Products called with %v, want [o/r]", got)
 	}
 }

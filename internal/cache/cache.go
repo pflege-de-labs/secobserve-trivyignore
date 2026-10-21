@@ -42,6 +42,8 @@ type Cache struct {
 	mu     sync.RWMutex
 	items  map[string]Item     // by product name
 	byRepo map[string][]string // normalized prefix -> sorted product names
+
+	listedAt time.Time // zero until the first successful ListProducts
 }
 
 func New(src Source, frontendURL string, now func() time.Time) *Cache {
@@ -110,7 +112,7 @@ func (c *Cache) Refresh(ctx context.Context) error {
 	}
 
 	c.mu.Lock()
-	c.items, c.byRepo = items, byRepo
+	c.items, c.byRepo, c.listedAt = items, byRepo, c.now()
 	c.mu.Unlock()
 	return errors.Join(errs...)
 }
@@ -157,4 +159,11 @@ func (c *Cache) Get(product string) (Item, bool) {
 	defer c.mu.RUnlock()
 	it, ok := c.items[product]
 	return it, ok
+}
+
+// ListedAt reports when the product list was last fetched successfully.
+func (c *Cache) ListedAt() (time.Time, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.listedAt, !c.listedAt.IsZero()
 }

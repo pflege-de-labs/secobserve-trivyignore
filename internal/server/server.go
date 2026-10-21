@@ -17,6 +17,7 @@ import (
 type Store interface {
 	Products(repository string) []string
 	Get(product string) (cache.Item, bool)
+	ListedAt() (time.Time, bool)
 }
 
 type Authenticator interface {
@@ -45,6 +46,13 @@ func New(store Store, authn Authenticator, maxStaleness time.Duration, now func(
 			fail(http.StatusForbidden, "forbidden")
 		case err != nil:
 			fail(http.StatusUnauthorized, "unauthorized")
+		}
+
+		// Before the first product list an empty mapping would wrongly read as 404.
+		if status == http.StatusOK {
+			if at, listed := store.ListedAt(); !listed || now().Sub(at) > maxStaleness {
+				fail(http.StatusServiceUnavailable, "ignore file unavailable")
+			}
 		}
 
 		var item cache.Item
