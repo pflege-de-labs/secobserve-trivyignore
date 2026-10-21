@@ -11,6 +11,10 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+
 	"github.com/pflege-de-labs/secobserve-trivyignore/internal/ignorefile"
 	"github.com/pflege-de-labs/secobserve-trivyignore/internal/secobserve"
 )
@@ -33,13 +37,38 @@ type Cache struct {
 	frontendURL string
 	now         func() time.Time
 
+	refreshErrors metric.Int64Counter
+
 	mu     sync.RWMutex
 	items  map[string]Item     // by product name
 	byRepo map[string][]string // normalized prefix -> sorted product names
 }
 
 func New(src Source, frontendURL string, now func() time.Time) *Cache {
-	return &Cache{src: src, frontendURL: frontendURL, now: now, items: map[string]Item{}, byRepo: map[string][]string{}}
+	c := &Cache{src: src, frontendURL: frontendURL, now: now, items: map[string]Item{}, byRepo: map[string][]string{}}
+	c.registerMetrics()
+	return c
+}
+
+// registerMetrics never fails the service: instrument errors only cost telemetry.
+func (c *Cache) registerMetrics() {
+	m := otel.Meter("secobserve-trivyignore")
+	c.refreshErrors, _ = m.Int64Counter("trivyignore.refresh.errors", metric.WithDescription("Failed product or product-list fetches"))
+	age, _ := m.Float64ObservableGauge("trivyignore.cache.age", metric.WithUnit("s"), metric.WithDescription("Seconds since the product was last fetched"))
+	entries, _ := m.Int64ObservableGauge("trivyignore.entries", metric.WithDescription("Ignore entries per product"))
+	skipped, _ := m.Int64ObservableGauge("trivyignore.skipped_no_purl", metric.WithDescription("Observations skipped for lacking a PURL, per product"))
+	_, _ = m.RegisterCallback(func(_ context.Context, o metric.Observer) error {
+		c.mu.RLock()
+		defer c.mu.RUnlock()
+		now := c.now()
+		for name, it := range c.items {
+			a := metric.WithAttributes(attribute.String("product", name))
+			o.ObserveFloat64(age, now.Sub(it.FetchedAt).Seconds(), a)
+			o.ObserveInt64(entries, int64(it.Entries), a)
+			o.ObserveInt64(skipped, int64(it.SkippedNoPURL), a)
+		}
+		return nil
+	}, age, entries, skipped)
 }
 
 func normalize(prefix string) string {
@@ -49,6 +78,7 @@ func normalize(prefix string) string {
 func (c *Cache) Refresh(ctx context.Context) error {
 	products, err := c.src.ListProducts(ctx)
 	if err != nil {
+		c.refreshErrors.Add(ctx, 1)
 		return fmt.Errorf("list products: %w", err)
 	}
 
@@ -66,6 +96,7 @@ func (c *Cache) Refresh(ctx context.Context) error {
 		}
 		it, err := c.build(ctx, p)
 		if err != nil {
+			c.refreshErrors.Add(ctx, 1)
 			errs = append(errs, fmt.Errorf("product %s: %w", p.Name, err))
 			if old, ok := prev[p.Name]; ok {
 				items[p.Name] = old
